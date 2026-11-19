@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Snap &amp; Segment</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Snap &amp; Segment</h1>
+    <div id="model-status" class="status">Loading model…</div>
+  </header>
+
+  <main>
+    <!-- Step 1: acquire an image -->
+    <section id="acquire">
+      <div class="video-wrap">
+        <video id="video" playsinline muted></video>
+        <div id="video-placeholder">Start the camera or upload a photo.</div>
+      </div>
+      <div class="toolbar">
+        <button id="btn-camera" class="primary">Start camera</button>
+        <button id="btn-flip" hidden>Switch camera</button>
+        <button id="btn-capture" class="primary" hidden>Take picture</button>
+        <label class="button">
+          Upload image
+          <input id="file-input" type="file" accept="image/*" capture="environment" hidden>
+        </label>
+      </div>
+    </section>
+
+    <!-- Step 2: annotate and segment -->
+    <section id="annotate" hidden>
+      <div class="toolbar tools" role="radiogroup" aria-label="Annotation tool">
+        <button data-tool="box" class="tool active" title="Drag a box around an object (new object)">▭ Box</button>
+        <button data-tool="scribble" class="tool" title="Scribble on an object (new object)">✎ Scribble</button>
+        <button data-tool="pos" class="tool" title="Add an include point to the selected object">＋ Point</button>
+        <button data-tool="neg" class="tool" title="Add an exclude point to the selected object">− Point</button>
+      </div>
+
+      <div class="stage">
+        <canvas id="canvas"></canvas>
+        <div id="busy" hidden><span class="spinner"></span><span id="busy-text"></span></div>
+      </div>
+
+      <div id="objects"></div>
+
+      <div class="toolbar">
+        <button id="btn-segment" class="primary" disabled>Segment objects</button>
+        <label class="toggle"><input id="chk-annotations" type="checkbox" checked> Show annotations</label>
+        <button id="btn-undo">Undo</button>
+        <button id="btn-clear">Clear</button>
+        <button id="btn-new">New picture</button>
+      </div>
+      <div class="toolbar">
+        <button id="btn-dl-overlay" disabled>Download overlay</button>
+        <button id="btn-dl-labels" disabled>Download label image</button>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" hidden></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
