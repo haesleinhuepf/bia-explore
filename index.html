@@ -7,57 +7,64 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header>
-    <h1>Snap &amp; Segment</h1>
-    <div id="model-status" class="status">Loading model…</div>
-  </header>
-
-  <main>
-    <!-- Step 1: acquire an image -->
-    <section id="acquire">
-      <div class="video-wrap">
+  <main id="app">
+    <div class="workspace">
+      <div id="acquire" class="video-wrap">
         <video id="video" playsinline muted></video>
         <div id="video-placeholder">Start the camera or upload a photo.</div>
       </div>
-      <div class="toolbar">
-        <button id="btn-camera" class="primary">Start camera</button>
-        <button id="btn-flip" hidden>Switch camera</button>
-        <button id="btn-capture" class="primary" hidden>Take picture</button>
-        <label class="button">
-          Upload image
-          <input id="file-input" type="file" accept="image/*" capture="environment" hidden>
-        </label>
-      </div>
-    </section>
-
-    <!-- Step 2: annotate and segment -->
-    <section id="annotate" hidden>
-      <div class="toolbar tools" role="radiogroup" aria-label="Annotation tool">
-        <button data-tool="box" class="tool active" title="Drag a box around an object (new object)">▭ Box</button>
-        <button data-tool="scribble" class="tool" title="Scribble on an object (new object)">✎ Scribble</button>
-        <button data-tool="pos" class="tool" title="Add an include point to the selected object">＋ Point</button>
-        <button data-tool="neg" class="tool" title="Add an exclude point to the selected object">− Point</button>
-      </div>
-
-      <div class="stage">
+      <div id="annotate" class="stage" hidden>
         <canvas id="canvas"></canvas>
         <div id="busy" hidden><span class="spinner"></span><span id="busy-text"></span></div>
       </div>
+    </div>
 
-      <div id="objects"></div>
+    <aside class="panel" aria-label="Controls">
+      <div class="panel-header">
+        <div>
+          <h1>Snap &amp; Segment</h1>
+          <div id="model-status" class="status" role="status">Loading model…</div>
+        </div>
+        <button id="btn-panel" class="panel-move" aria-label="Move panel to left" title="Move panel to left">⇤</button>
+      </div>
 
-      <div class="toolbar">
-        <button id="btn-segment" class="primary" disabled>Segment objects</button>
-        <label class="toggle"><input id="chk-annotations" type="checkbox" checked> Show annotations</label>
-        <button id="btn-undo">Undo</button>
-        <button id="btn-clear">Clear</button>
-        <button id="btn-new">New picture</button>
+      <div class="panel-content">
+        <section>
+          <h2>Image</h2>
+          <button id="btn-camera" class="primary">Start camera</button>
+          <button id="btn-capture" disabled>Take picture</button>
+          <button id="btn-flip" disabled>Switch camera</button>
+          <label class="button">
+            Upload image
+            <input id="file-input" type="file" accept="image/*" capture="environment" hidden>
+          </label>
+          <button id="btn-new" disabled>New picture</button>
+        </section>
+
+        <section>
+          <h2>Annotate</h2>
+          <div class="tools" role="group" aria-label="Annotation tool">
+            <button data-tool="box" class="tool active" title="Drag a box around an object (new object)" aria-pressed="true" disabled>▭ Box</button>
+            <button data-tool="scribble" class="tool" title="Scribble on an object (new object)" aria-pressed="false" disabled>✎ Scribble</button>
+            <button data-tool="pos" class="tool" title="Add an include point to the selected object" aria-pressed="false" disabled>＋ Point</button>
+            <button data-tool="neg" class="tool" title="Add an exclude point to the selected object" aria-pressed="false" disabled>− Point</button>
+          </div>
+          <div id="objects"></div>
+          <label class="toggle"><input id="chk-annotations" type="checkbox" checked disabled> Show annotations</label>
+          <div class="button-row">
+            <button id="btn-undo" disabled>Undo</button>
+            <button id="btn-clear" disabled>Clear</button>
+          </div>
+        </section>
+
+        <section>
+          <h2>Results</h2>
+          <button id="btn-segment" class="primary" disabled>Segment objects</button>
+          <button id="btn-dl-overlay" disabled>Download overlay</button>
+          <button id="btn-dl-labels" disabled>Download label image</button>
+        </section>
       </div>
-      <div class="toolbar">
-        <button id="btn-dl-overlay" disabled>Download overlay</button>
-        <button id="btn-dl-labels" disabled>Download label image</button>
-      </div>
-    </section>
+    </aside>
   </main>
 
   <div id="toast" hidden></div>

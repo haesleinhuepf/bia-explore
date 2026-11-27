@@ -48,12 +48,18 @@ const modelReady = rpc('load').then(
     throw err;
   },
 );
+modelReady.catch(() => {});
 
 // ---------- State ----------
 
 const image = document.createElement('canvas'); // the captured picture
 const overlay = document.createElement('canvas'); // rendered masks
 let embedding = null; // promise resolving once the current image is embedded
+let embeddingQueue = Promise.resolve();
+let embeddingReady = false;
+let embeddingFailed = false;
+let hasImage = false;
+let busy = false;
 let objects = [];     // { id, color, box, stroke, points: [{x, y, label}], mask, score, dirty }
 let selectedId = null;
 let tool = 'box';
@@ -65,6 +71,7 @@ let objectCounter = 0;
 
 let stream = null;
 let facingMode = 'environment';
+let cameraLoading = false;
 
 async function startCamera() {
   stopCamera();
@@ -72,21 +79,24 @@ async function startCamera() {
     toast('Camera needs HTTPS (or localhost). Use "Upload image" instead.');
     return;
   }
+  cameraLoading = true;
+  updateUI();
   try {
     stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } },
       audio: false,
     });
+    video.srcObject = stream;
+    await video.play();
+    $('video-placeholder').hidden = true;
   } catch (err) {
+    stopCamera();
+    $('video-placeholder').hidden = false;
     toast(`Camera unavailable: ${err.message}`);
-    return;
+  } finally {
+    cameraLoading = false;
+    updateUI();
   }
-  video.srcObject = stream;
-  await video.play();
-  $('video-placeholder').hidden = true;
-  $('btn-capture').hidden = false;
-  $('btn-flip').hidden = false;
-  $('btn-camera').hidden = true;
 }
 
 function stopCamera() {
@@ -102,10 +112,15 @@ function capture() {
 
 async function upload(file) {
   if (!file) return;
-  const bitmap = await createImageBitmap(file);
-  setImage(bitmap, bitmap.width, bitmap.height);
-  bitmap.close();
-  stopCamera();
+  try {
+    const bitmap = await createImageBitmap(file);
+    setImage(bitmap, bitmap.width, bitmap.height);
+    bitmap.close();
+    stopCamera();
+    updateUI();
+  } catch (err) {
+    toast(`Could not open image: ${err.message}`);
+  }
 }
 
 function setImage(source, w, h) {
@@ -118,6 +133,9 @@ function setImage(source, w, h) {
   history = [];
   selectedId = null;
   objectCounter = 0;
+  hasImage = true;
+  embeddingReady = false;
+  embeddingFailed = false;
   rebuildOverlay();
 
   $('acquire').hidden = true;
@@ -127,18 +145,33 @@ function setImage(source, w, h) {
 
   // Start the expensive image-encoder pass right away, so segmentation is quick later.
   const { data, width, height } = image.getContext('2d').getImageData(0, 0, image.width, image.height);
-  embedding = modelReady.then(() => rpc('embed', { data: data.buffer, width, height }, [data.buffer]));
-  embedding.catch((err) => toast(`Embedding failed: ${err.message}`));
+  embedding = embeddingQueue.catch(() => {}).then(() => modelReady)
+    .then(() => rpc('embed', { data: data.buffer, width, height }, [data.buffer]));
+  embeddingQueue = embedding;
+  const currentEmbedding = embedding;
+  embedding.then(() => {
+    if (embedding === currentEmbedding && hasImage) {
+      embeddingReady = true;
+      updateUI();
+    }
+  }, (err) => {
+    if (embedding === currentEmbedding && hasImage) {
+      embeddingFailed = true;
+      updateUI();
+      toast(`Embedding failed: ${err.message}`);
+    }
+  });
 }
 
 function newPicture() {
+  hasImage = false;
+  embedding = null;
+  embeddingReady = false;
   $('annotate').hidden = true;
   $('acquire').hidden = false;
   $('video-placeholder').hidden = false;
-  $('btn-camera').hidden = false;
-  $('btn-capture').hidden = true;
-  $('btn-flip').hidden = true;
   $('file-input').value = '';
+  updateUI();
 }
 
 // ---------- Annotation ----------
@@ -407,7 +440,8 @@ function updateUI() {
       + `Object ${o.id}`
       + (o.score != null ? ` <span class="score">${o.dirty ? 'outdated' : `IoU ${o.score.toFixed(2)}`}</span>` : '')
       + `<button title="Delete object" aria-label="Delete object ${o.id}">×</button>`;
-    chip.onclick = () => { selectedId = o.id; afterEdit(); };
+    chip.onclick = () => { if (!busy) { selectedId = o.id; afterEdit(); } };
+    chip.querySelector('button').disabled = busy;
     chip.querySelector('button').onclick = (e) => {
       e.stopPropagation();
       removeObject(o.id);
@@ -417,19 +451,31 @@ function updateUI() {
   }));
 
   const pendingCount = objects.filter((o) => o.dirty).length;
-  $('btn-segment').disabled = pendingCount === 0;
-  $('btn-segment').textContent = pendingCount
-    ? `Segment ${pendingCount} object${pendingCount > 1 ? 's' : ''}`
-    : 'Segment objects';
+  $('btn-camera').disabled = busy || cameraLoading || hasImage || !!stream;
+  $('btn-capture').disabled = busy || cameraLoading || hasImage || !stream;
+  $('btn-flip').disabled = busy || cameraLoading || hasImage || !stream;
+  $('file-input').disabled = busy || cameraLoading || hasImage;
+  $('btn-new').disabled = busy || !hasImage;
+  document.querySelectorAll('.tool').forEach((btn) => { btn.disabled = busy || !hasImage; });
+  $('chk-annotations').disabled = busy || !hasImage;
+  $('btn-clear').disabled = busy || !hasImage || !objects.length;
+  $('btn-segment').disabled = busy || !hasImage || !embeddingReady || pendingCount === 0;
+  $('btn-segment').textContent = hasImage && !embeddingReady
+    ? (embeddingFailed ? 'Image preparation failed' : 'Preparing image…')
+    : pendingCount
+      ? `Segment ${pendingCount} object${pendingCount > 1 ? 's' : ''}`
+      : 'Segment objects';
   const hasMasks = objects.some((o) => o.mask);
-  $('btn-dl-overlay').disabled = !hasMasks;
-  $('btn-dl-labels').disabled = !hasMasks;
-  $('btn-undo').disabled = !history.length;
+  $('btn-dl-overlay').disabled = busy || !hasImage || !hasMasks;
+  $('btn-dl-labels').disabled = busy || !hasImage || !hasMasks;
+  $('btn-undo').disabled = busy || !hasImage || !history.length;
 }
 
 function setBusy(text) {
+  busy = !!text;
   $('busy').hidden = !text;
   $('busy-text').textContent = text ?? '';
+  updateUI();
 }
 
 let toastTimer;
@@ -484,6 +530,13 @@ function downloadLabels() {
 // ---------- Wiring ----------
 
 $('btn-camera').onclick = startCamera;
+$('btn-panel').onclick = () => {
+  const left = $('app').classList.toggle('panel-left');
+  const label = `Move panel to ${left ? 'right' : 'left'}`;
+  $('btn-panel').textContent = left ? '⇥' : '⇤';
+  $('btn-panel').setAttribute('aria-label', label);
+  $('btn-panel').title = label;
+};
 $('btn-flip').onclick = () => {
   facingMode = facingMode === 'environment' ? 'user' : 'environment';
   startCamera();
@@ -507,12 +560,15 @@ $('btn-dl-labels').onclick = downloadLabels;
 document.querySelectorAll('.tool').forEach((btn) => {
   btn.onclick = () => {
     tool = btn.dataset.tool;
-    document.querySelectorAll('.tool').forEach((b) => b.classList.toggle('active', b === btn));
+    document.querySelectorAll('.tool').forEach((b) => {
+      b.classList.toggle('active', b === btn);
+      b.setAttribute('aria-pressed', b === btn);
+    });
   };
 });
 
 document.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+  if (!busy && hasImage && (e.ctrlKey || e.metaKey) && e.key === 'z') {
     e.preventDefault();
     undo();
   }
