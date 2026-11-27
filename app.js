@@ -48,45 +48,57 @@ const modelReady = rpc('load').then(
     throw err;
   },
 );
+modelReady.catch(() => {});
 
 // ---------- State ----------
 
 const image = document.createElement('canvas'); // the captured picture
 const overlay = document.createElement('canvas'); // rendered masks
 let embedding = null; // promise resolving once the current image is embedded
+let embeddingQueue = Promise.resolve();
+let embeddingReady = false;
+let embeddingFailed = false;
+let hasImage = false;
+let busy = false;
 let objects = [];     // { id, color, box, stroke, points: [{x, y, label}], mask, score, dirty }
 let selectedId = null;
-let tool = 'box';
+let tool = 'scribble';
 let drag = null;      // in-progress box or scribble
 let history = [];     // undo stack
 let objectCounter = 0;
+let lastClearTime = 0;
 
 // ---------- Camera / image acquisition ----------
 
 let stream = null;
 let facingMode = 'environment';
+let cameraLoading = false;
 
 async function startCamera() {
   stopCamera();
   if (!navigator.mediaDevices?.getUserMedia) {
-    toast('Camera needs HTTPS (or localhost). Use "Upload image" instead.');
+    toast('Camera needs HTTPS (or localhost). Use "Upload picture" instead.');
     return;
   }
+  cameraLoading = true;
+  updateUI();
   try {
     stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } },
       audio: false,
     });
+    video.srcObject = stream;
+    await video.play();
+    if (hasImage) newPicture();
+    $('video-placeholder').hidden = true;
   } catch (err) {
+    stopCamera();
+    $('video-placeholder').hidden = false;
     toast(`Camera unavailable: ${err.message}`);
-    return;
+  } finally {
+    cameraLoading = false;
+    updateUI();
   }
-  video.srcObject = stream;
-  await video.play();
-  $('video-placeholder').hidden = true;
-  $('btn-capture').hidden = false;
-  $('btn-flip').hidden = false;
-  $('btn-camera').hidden = true;
 }
 
 function stopCamera() {
@@ -98,14 +110,20 @@ function stopCamera() {
 function capture() {
   setImage(video, video.videoWidth, video.videoHeight);
   stopCamera();
+  updateUI();
 }
 
 async function upload(file) {
   if (!file) return;
-  const bitmap = await createImageBitmap(file);
-  setImage(bitmap, bitmap.width, bitmap.height);
-  bitmap.close();
-  stopCamera();
+  try {
+    const bitmap = await createImageBitmap(file);
+    setImage(bitmap, bitmap.width, bitmap.height);
+    bitmap.close();
+    stopCamera();
+    updateUI();
+  } catch (err) {
+    toast(`Could not open image: ${err.message}`);
+  }
 }
 
 function setImage(source, w, h) {
@@ -118,6 +136,10 @@ function setImage(source, w, h) {
   history = [];
   selectedId = null;
   objectCounter = 0;
+  lastClearTime = 0;
+  hasImage = true;
+  embeddingReady = false;
+  embeddingFailed = false;
   rebuildOverlay();
 
   $('acquire').hidden = true;
@@ -127,18 +149,38 @@ function setImage(source, w, h) {
 
   // Start the expensive image-encoder pass right away, so segmentation is quick later.
   const { data, width, height } = image.getContext('2d').getImageData(0, 0, image.width, image.height);
-  embedding = modelReady.then(() => rpc('embed', { data: data.buffer, width, height }, [data.buffer]));
-  embedding.catch((err) => toast(`Embedding failed: ${err.message}`));
+  embedding = embeddingQueue.catch(() => {}).then(() => modelReady)
+    .then(() => rpc('embed', { data: data.buffer, width, height }, [data.buffer]));
+  embeddingQueue = embedding;
+  const currentEmbedding = embedding;
+  embedding.then(() => {
+    if (embedding === currentEmbedding && hasImage) {
+      embeddingReady = true;
+      updateUI();
+    }
+  }, (err) => {
+    if (embedding === currentEmbedding && hasImage) {
+      embeddingFailed = true;
+      updateUI();
+      toast(`Embedding failed: ${err.message}`);
+    }
+  });
 }
 
 function newPicture() {
+  hasImage = false;
+  embedding = null;
+  embeddingReady = false;
+  objects = [];
+  history = [];
+  selectedId = null;
+  drag = null;
+  lastClearTime = 0;
   $('annotate').hidden = true;
   $('acquire').hidden = false;
   $('video-placeholder').hidden = false;
-  $('btn-camera').hidden = false;
-  $('btn-capture').hidden = true;
-  $('btn-flip').hidden = true;
   $('file-input').value = '';
+  updateUI();
 }
 
 // ---------- Annotation ----------
@@ -203,6 +245,7 @@ function samplePoints(stroke) {
 }
 
 canvas.addEventListener('pointerdown', (e) => {
+  if (busy) return;
   canvas.setPointerCapture(e.pointerId);
   const p = canvasPoint(e);
   if (tool === 'box') drag = { type: 'box', start: p, end: p };
@@ -331,9 +374,7 @@ function render() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(image, 0, 0);
   ctx.drawImage(overlay, 0, 0);
-  if ($('chk-annotations').checked) {
-    for (const o of objects) drawAnnotation(o, o.id === selectedId);
-  }
+  for (const o of objects) drawAnnotation(o, o.id === selectedId);
   drawDrag();
 }
 
@@ -399,37 +440,26 @@ function drawDrag() {
 // ---------- UI ----------
 
 function updateUI() {
-  const list = $('objects');
-  list.replaceChildren(...objects.map((o) => {
-    const chip = document.createElement('div');
-    chip.className = 'chip' + (o.id === selectedId ? ' selected' : '');
-    chip.innerHTML = `<span class="swatch" style="background:${o.color}"></span>`
-      + `Object ${o.id}`
-      + (o.score != null ? ` <span class="score">${o.dirty ? 'outdated' : `IoU ${o.score.toFixed(2)}`}</span>` : '')
-      + `<button title="Delete object" aria-label="Delete object ${o.id}">×</button>`;
-    chip.onclick = () => { selectedId = o.id; afterEdit(); };
-    chip.querySelector('button').onclick = (e) => {
-      e.stopPropagation();
-      removeObject(o.id);
-      afterEdit();
-    };
-    return chip;
-  }));
-
   const pendingCount = objects.filter((o) => o.dirty).length;
-  $('btn-segment').disabled = pendingCount === 0;
-  $('btn-segment').textContent = pendingCount
-    ? `Segment ${pendingCount} object${pendingCount > 1 ? 's' : ''}`
-    : 'Segment objects';
+  $('btn-capture').disabled = busy || cameraLoading;
+  $('btn-flip').disabled = busy || cameraLoading || hasImage || !stream;
+  $('btn-flip').hidden = !stream || hasImage;
+  $('btn-upload').hidden = !!stream && !hasImage;
+  $('btn-upload').disabled = busy || cameraLoading;
+  $('file-input').disabled = busy || cameraLoading;
+  $('btn-clear').disabled = busy || !hasImage;
+  $('btn-segment').disabled = busy || !hasImage || !embeddingReady || pendingCount === 0;
+  $('btn-segment').title = hasImage && !embeddingReady
+    ? (embeddingFailed ? 'Image preparation failed' : 'Preparing image…') : '';
   const hasMasks = objects.some((o) => o.mask);
-  $('btn-dl-overlay').disabled = !hasMasks;
-  $('btn-dl-labels').disabled = !hasMasks;
-  $('btn-undo').disabled = !history.length;
+  $('btn-dl-labels').disabled = busy || !hasImage || !hasMasks;
 }
 
 function setBusy(text) {
+  busy = !!text;
   $('busy').hidden = !text;
   $('busy-text').textContent = text ?? '';
+  updateUI();
 }
 
 let toastTimer;
@@ -449,16 +479,6 @@ function download(c, name) {
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }, 'image/png');
-}
-
-function downloadOverlay() {
-  const c = document.createElement('canvas');
-  c.width = image.width;
-  c.height = image.height;
-  const cctx = c.getContext('2d');
-  cctx.drawImage(image, 0, 0);
-  cctx.drawImage(overlay, 0, 0);
-  download(c, 'segmentation-overlay.png');
 }
 
 // Grayscale PNG where pixel value = object number (0 = background).
@@ -483,36 +503,36 @@ function downloadLabels() {
 
 // ---------- Wiring ----------
 
-$('btn-camera').onclick = startCamera;
 $('btn-flip').onclick = () => {
   facingMode = facingMode === 'environment' ? 'user' : 'environment';
   startCamera();
 };
-$('btn-capture').onclick = capture;
-$('file-input').onchange = (e) => upload(e.target.files[0]);
+$('btn-capture').onclick = () => stream ? capture() : startCamera();
+$('btn-upload').onclick = () => $('file-input').click();
+$('file-input').onchange = (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  upload(file);
+};
 $('btn-segment').onclick = segmentAll;
-$('btn-undo').onclick = undo;
-$('btn-clear').onclick = () => {
+$('btn-clear').onclick = (e) => {
+  const now = performance.now();
+  if (e.detail === 2 || (lastClearTime && now - lastClearTime < 400)) {
+    newPicture();
+    return;
+  }
+  lastClearTime = now;
   objects = [];
   history = [];
   selectedId = null;
+  drag = null;
   rebuildOverlay();
   afterEdit();
 };
-$('btn-new').onclick = newPicture;
-$('chk-annotations').onchange = render;
-$('btn-dl-overlay').onclick = downloadOverlay;
 $('btn-dl-labels').onclick = downloadLabels;
 
-document.querySelectorAll('.tool').forEach((btn) => {
-  btn.onclick = () => {
-    tool = btn.dataset.tool;
-    document.querySelectorAll('.tool').forEach((b) => b.classList.toggle('active', b === btn));
-  };
-});
-
 document.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+  if (!busy && hasImage && (e.ctrlKey || e.metaKey) && e.key === 'z') {
     e.preventDefault();
     undo();
   }
