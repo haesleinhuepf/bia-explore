@@ -76,7 +76,7 @@ let cameraLoading = false;
 async function startCamera() {
   stopCamera();
   if (!navigator.mediaDevices?.getUserMedia) {
-    toast('Camera needs HTTPS (or localhost). Use "Upload image" instead.');
+    toast('Camera needs HTTPS (or localhost). Use "Upload picture" instead.');
     return;
   }
   cameraLoading = true;
@@ -108,6 +108,7 @@ function stopCamera() {
 function capture() {
   setImage(video, video.videoWidth, video.videoHeight);
   stopCamera();
+  updateUI();
 }
 
 async function upload(file) {
@@ -367,9 +368,7 @@ function render() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(image, 0, 0);
   ctx.drawImage(overlay, 0, 0);
-  if ($('chk-annotations').checked) {
-    for (const o of objects) drawAnnotation(o, o.id === selectedId);
-  }
+  for (const o of objects) drawAnnotation(o, o.id === selectedId);
   drawDrag();
 }
 
@@ -441,7 +440,6 @@ function updateUI() {
     chip.className = 'chip' + (o.id === selectedId ? ' selected' : '');
     chip.innerHTML = `<span class="swatch" style="background:${o.color}"></span>`
       + `Object ${o.id}`
-      + (o.score != null ? ` <span class="score">${o.dirty ? 'outdated' : `IoU ${o.score.toFixed(2)}`}</span>` : '')
       + `<button title="Delete object" aria-label="Delete object ${o.id}">×</button>`;
     chip.onclick = () => { if (!busy) { selectedId = o.id; afterEdit(); } };
     chip.querySelector('button').disabled = busy;
@@ -454,13 +452,14 @@ function updateUI() {
   }));
 
   const pendingCount = objects.filter((o) => o.dirty).length;
-  $('btn-camera').disabled = busy || cameraLoading || hasImage || !!stream;
-  $('btn-capture').disabled = busy || cameraLoading || hasImage || !stream;
+  $('btn-capture').disabled = busy || cameraLoading || hasImage;
   $('btn-flip').disabled = busy || cameraLoading || hasImage || !stream;
+  $('btn-flip').hidden = !stream || hasImage;
+  $('btn-upload').hidden = !!stream && !hasImage;
+  $('btn-upload').disabled = busy || cameraLoading || hasImage;
   $('file-input').disabled = busy || cameraLoading || hasImage;
   $('btn-new').disabled = busy || !hasImage;
   document.querySelectorAll('.tool').forEach((btn) => { btn.disabled = busy || !hasImage; });
-  $('chk-annotations').disabled = busy || !hasImage;
   $('btn-clear').disabled = busy || !hasImage || !objects.length;
   $('btn-segment').disabled = busy || !hasImage || !embeddingReady || pendingCount === 0;
   $('btn-segment').textContent = hasImage && !embeddingReady
@@ -471,7 +470,6 @@ function updateUI() {
   const hasMasks = objects.some((o) => o.mask);
   $('btn-dl-overlay').disabled = busy || !hasImage || !hasMasks;
   $('btn-dl-labels').disabled = busy || !hasImage || !hasMasks;
-  $('btn-undo').disabled = busy || !hasImage || !history.length;
 }
 
 function setBusy(text) {
@@ -532,11 +530,10 @@ function downloadLabels() {
 
 // ---------- Wiring ----------
 
-$('btn-camera').onclick = startCamera;
 $('btn-panel').onclick = () => {
   const left = $('app').classList.toggle('panel-left');
   const label = `Move panel to ${left ? 'right' : 'left'}`;
-  $('btn-panel').textContent = left ? '⇥' : '⇤';
+  $('btn-panel').textContent = `${left ? '⇥' : '⇤'} Move panel`;
   $('btn-panel').setAttribute('aria-label', label);
   $('btn-panel').title = label;
 };
@@ -544,10 +541,10 @@ $('btn-flip').onclick = () => {
   facingMode = facingMode === 'environment' ? 'user' : 'environment';
   startCamera();
 };
-$('btn-capture').onclick = capture;
+$('btn-capture').onclick = () => stream ? capture() : startCamera();
+$('btn-upload').onclick = () => $('file-input').click();
 $('file-input').onchange = (e) => upload(e.target.files[0]);
 $('btn-segment').onclick = segmentAll;
-$('btn-undo').onclick = undo;
 $('btn-clear').onclick = () => {
   objects = [];
   history = [];
@@ -556,7 +553,6 @@ $('btn-clear').onclick = () => {
   afterEdit();
 };
 $('btn-new').onclick = newPicture;
-$('chk-annotations').onchange = render;
 $('btn-dl-overlay').onclick = downloadOverlay;
 $('btn-dl-labels').onclick = downloadLabels;
 
