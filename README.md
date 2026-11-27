@@ -26,16 +26,13 @@ model, so later starts skip the download.
 
 1. Hold your phone in landscape. Tap **Take picture** to start the camera, then tap it again to capture
    (or choose **Upload picture**). **Switch camera** is available while the camera is on.
-2. Mark each object:
-   - **Box**: drag a box around an object. This creates a new object.
-   - **Scribble**: draw on an object. This creates a new object, and points sampled along the stroke become
-     prompts.
-   - **＋ / − Point**: refine the selected object with include and exclude clicks.
-3. **Segment objects**. Only new or changed objects are recomputed.
-4. Download the colored overlay, or a label image where each pixel value is the object number.
+2. Draw on each object to mark it. Points sampled along each stroke become segmentation prompts.
+3. Tap **Segment**. Segmentation becomes available after the image is prepared and at least one object
+   has been marked. Only new or changed objects are recomputed.
+4. Tap **Download segmentation** for a label image where each pixel value is the object number.
 
-Use **Move panel** to move the controls to the other side. The object list scrolls when necessary.
-Segmentation becomes available after the image is prepared and at least one object has been marked.
+Tap **Clear** to remove annotations and segmentation while keeping the picture. Double-tap **Clear**
+to return to the start. You can also take or upload another picture to replace the current one.
 
 ## How it works
 

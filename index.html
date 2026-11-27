@@ -11,7 +11,7 @@
     <div class="workspace">
       <div id="acquire" class="video-wrap">
         <video id="video" playsinline muted></video>
-        <div id="video-placeholder">Take a picture or upload a photo.</div>
+        <div id="video-placeholder"></div>
       </div>
       <div id="annotate" class="stage" hidden>
         <canvas id="canvas"></canvas>
@@ -22,31 +22,13 @@
     <aside class="panel" aria-label="Controls">
       <div class="panel-content">
         <div id="model-status" class="status" role="status">Loading model…</div>
-        <button id="btn-panel" aria-label="Move panel to left" title="Move panel to left">⇤ Move panel</button>
-        <button id="btn-new" disabled>New picture</button>
-        <section>
-          <button id="btn-capture" class="primary">Take picture</button>
-          <button id="btn-flip" hidden disabled>Switch camera</button>
-          <button id="btn-upload">Upload picture</button>
-          <input id="file-input" type="file" accept="image/*" hidden>
-        </section>
-
-        <section>
-          <div class="tools" role="group" aria-label="Annotation tool">
-            <button data-tool="box" class="tool active" title="Drag a box around an object (new object)" aria-pressed="true" disabled>▭ Box</button>
-            <button data-tool="scribble" class="tool" title="Scribble on an object (new object)" aria-pressed="false" disabled>✎ Scribble</button>
-            <button data-tool="pos" class="tool" title="Add an include point to the selected object" aria-pressed="false" disabled>＋ Point</button>
-            <button data-tool="neg" class="tool" title="Add an exclude point to the selected object" aria-pressed="false" disabled>− Point</button>
-          </div>
-          <div id="objects"></div>
-          <button id="btn-clear" disabled>Clear</button>
-          <button id="btn-segment" class="primary" disabled>Segment objects</button>
-        </section>
-
-        <section>
-          <button id="btn-dl-overlay" disabled>Download overlay</button>
-          <button id="btn-dl-labels" disabled>Download label image</button>
-        </section>
+        <button id="btn-capture">Take picture</button>
+        <button id="btn-flip" hidden disabled>Switch camera</button>
+        <button id="btn-upload">Upload picture</button>
+        <input id="file-input" type="file" accept="image/*" hidden>
+        <button id="btn-segment" disabled>Segment</button>
+        <button id="btn-dl-labels" disabled>Download segmentation</button>
+        <button id="btn-clear" disabled>Clear</button>
       </div>
     </aside>
   </main>

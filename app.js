@@ -62,10 +62,11 @@ let hasImage = false;
 let busy = false;
 let objects = [];     // { id, color, box, stroke, points: [{x, y, label}], mask, score, dirty }
 let selectedId = null;
-let tool = 'box';
+let tool = 'scribble';
 let drag = null;      // in-progress box or scribble
 let history = [];     // undo stack
 let objectCounter = 0;
+let lastClearTime = 0;
 
 // ---------- Camera / image acquisition ----------
 
@@ -88,6 +89,7 @@ async function startCamera() {
     });
     video.srcObject = stream;
     await video.play();
+    if (hasImage) newPicture();
     $('video-placeholder').hidden = true;
   } catch (err) {
     stopCamera();
@@ -134,6 +136,7 @@ function setImage(source, w, h) {
   history = [];
   selectedId = null;
   objectCounter = 0;
+  lastClearTime = 0;
   hasImage = true;
   embeddingReady = false;
   embeddingFailed = false;
@@ -171,6 +174,8 @@ function newPicture() {
   objects = [];
   history = [];
   selectedId = null;
+  drag = null;
+  lastClearTime = 0;
   $('annotate').hidden = true;
   $('acquire').hidden = false;
   $('video-placeholder').hidden = false;
@@ -240,6 +245,7 @@ function samplePoints(stroke) {
 }
 
 canvas.addEventListener('pointerdown', (e) => {
+  if (busy) return;
   canvas.setPointerCapture(e.pointerId);
   const p = canvasPoint(e);
   if (tool === 'box') drag = { type: 'box', start: p, end: p };
@@ -434,41 +440,18 @@ function drawDrag() {
 // ---------- UI ----------
 
 function updateUI() {
-  const list = $('objects');
-  list.replaceChildren(...objects.map((o) => {
-    const chip = document.createElement('div');
-    chip.className = 'chip' + (o.id === selectedId ? ' selected' : '');
-    chip.innerHTML = `<span class="swatch" style="background:${o.color}"></span>`
-      + `Object ${o.id}`
-      + `<button title="Delete object" aria-label="Delete object ${o.id}">×</button>`;
-    chip.onclick = () => { if (!busy) { selectedId = o.id; afterEdit(); } };
-    chip.querySelector('button').disabled = busy;
-    chip.querySelector('button').onclick = (e) => {
-      e.stopPropagation();
-      removeObject(o.id);
-      afterEdit();
-    };
-    return chip;
-  }));
-
   const pendingCount = objects.filter((o) => o.dirty).length;
-  $('btn-capture').disabled = busy || cameraLoading || hasImage;
+  $('btn-capture').disabled = busy || cameraLoading;
   $('btn-flip').disabled = busy || cameraLoading || hasImage || !stream;
   $('btn-flip').hidden = !stream || hasImage;
   $('btn-upload').hidden = !!stream && !hasImage;
-  $('btn-upload').disabled = busy || cameraLoading || hasImage;
-  $('file-input').disabled = busy || cameraLoading || hasImage;
-  $('btn-new').disabled = busy || !hasImage;
-  document.querySelectorAll('.tool').forEach((btn) => { btn.disabled = busy || !hasImage; });
-  $('btn-clear').disabled = busy || !hasImage || !objects.length;
+  $('btn-upload').disabled = busy || cameraLoading;
+  $('file-input').disabled = busy || cameraLoading;
+  $('btn-clear').disabled = busy || !hasImage;
   $('btn-segment').disabled = busy || !hasImage || !embeddingReady || pendingCount === 0;
-  $('btn-segment').textContent = hasImage && !embeddingReady
-    ? (embeddingFailed ? 'Image preparation failed' : 'Preparing image…')
-    : pendingCount
-      ? `Segment ${pendingCount} object${pendingCount > 1 ? 's' : ''}`
-      : 'Segment objects';
+  $('btn-segment').title = hasImage && !embeddingReady
+    ? (embeddingFailed ? 'Image preparation failed' : 'Preparing image…') : '';
   const hasMasks = objects.some((o) => o.mask);
-  $('btn-dl-overlay').disabled = busy || !hasImage || !hasMasks;
   $('btn-dl-labels').disabled = busy || !hasImage || !hasMasks;
 }
 
@@ -498,16 +481,6 @@ function download(c, name) {
   }, 'image/png');
 }
 
-function downloadOverlay() {
-  const c = document.createElement('canvas');
-  c.width = image.width;
-  c.height = image.height;
-  const cctx = c.getContext('2d');
-  cctx.drawImage(image, 0, 0);
-  cctx.drawImage(overlay, 0, 0);
-  download(c, 'segmentation-overlay.png');
-}
-
 // Grayscale PNG where pixel value = object number (0 = background).
 function downloadLabels() {
   const c = document.createElement('canvas');
@@ -530,41 +503,33 @@ function downloadLabels() {
 
 // ---------- Wiring ----------
 
-$('btn-panel').onclick = () => {
-  const left = $('app').classList.toggle('panel-left');
-  const label = `Move panel to ${left ? 'right' : 'left'}`;
-  $('btn-panel').textContent = `${left ? '⇥' : '⇤'} Move panel`;
-  $('btn-panel').setAttribute('aria-label', label);
-  $('btn-panel').title = label;
-};
 $('btn-flip').onclick = () => {
   facingMode = facingMode === 'environment' ? 'user' : 'environment';
   startCamera();
 };
 $('btn-capture').onclick = () => stream ? capture() : startCamera();
 $('btn-upload').onclick = () => $('file-input').click();
-$('file-input').onchange = (e) => upload(e.target.files[0]);
+$('file-input').onchange = (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  upload(file);
+};
 $('btn-segment').onclick = segmentAll;
-$('btn-clear').onclick = () => {
+$('btn-clear').onclick = (e) => {
+  const now = performance.now();
+  if (e.detail === 2 || (lastClearTime && now - lastClearTime < 400)) {
+    newPicture();
+    return;
+  }
+  lastClearTime = now;
   objects = [];
   history = [];
   selectedId = null;
+  drag = null;
   rebuildOverlay();
   afterEdit();
 };
-$('btn-new').onclick = newPicture;
-$('btn-dl-overlay').onclick = downloadOverlay;
 $('btn-dl-labels').onclick = downloadLabels;
-
-document.querySelectorAll('.tool').forEach((btn) => {
-  btn.onclick = () => {
-    tool = btn.dataset.tool;
-    document.querySelectorAll('.tool').forEach((b) => {
-      b.classList.toggle('active', b === btn);
-      b.setAttribute('aria-pressed', b === btn);
-    });
-  };
-});
 
 document.addEventListener('keydown', (e) => {
   if (!busy && hasImage && (e.ctrlKey || e.metaKey) && e.key === 'z') {
