@@ -167,6 +167,9 @@ function newPicture() {
   hasImage = false;
   embedding = null;
   embeddingReady = false;
+  objects = [];
+  history = [];
+  selectedId = null;
   $('annotate').hidden = true;
   $('acquire').hidden = false;
   $('video-placeholder').hidden = false;
